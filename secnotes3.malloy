@@ -12,7 +12,7 @@ source: txt is duckdb.sql("""
   select * from 'txt*.parquet'
 """) extend {
   join_one: sub with adsh   
-  measure: count_of_values is count(value)
+  measure: count_of_values is count(value) {where: value ~ "%artifical intelligence%"}
 }
 
 source: num is duckdb.sql("""
@@ -25,14 +25,14 @@ source: num is duckdb.sql("""
       noncurrent_asset_count is count() { where: tag = 'AssetsNoncurrent' }
       noncurrent_assets is pick assets - current_assets when noncurrent_asset_count = 0 
                            else value.sum() { where: tag = 'AssetsNoncurrent'}
-      netincomeloss is pick value.sum() when { where: tag = 'NetIncomeLoss'}
-                       pick value.sum() when { where: tag = 'ProfitLoss'}
-                       pick value.sum() when { where: tag = 'NetIncomeLossAvailableToCommonStockholdersBasic' }
-                       pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperations'}
-                       pick value.sum() when { where: tag = 'IncomeLossAttributableToParent'}
-                       pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest'}
-                       else null
-      revenues_count is count() {where: tag = "Revenues" or tag = "SalesRevenueNet" or tag = "RevenueFromContractWithCustomerExcludingAssessedTax" or tag='SalesRevenueServicesNet' or tag='RevenuesNetOfInterestExpense' or tag='RegulatedAndUnregulatedOperatingRevenue' or tag='HealthCareOrganizationRevenue' or tag='InterestAndDividendIncomeOperating' or tag='RealEstateRevenueNet' or tag='RevenueMineralSales' or tag='OilAndGasRevenue' or tag = 'FinancialServicesRevenue' or tag = 'RegulatedAndUnregulatedOperatingRevenue'}
+      --netincomeloss is pick value.sum() when { where: tag = 'NetIncomeLoss'}
+      --                 pick value.sum() when { where: tag = 'ProfitLoss'}
+       --                pick value.sum() when { where: tag = 'NetIncomeLossAvailableToCommonStockholdersBasic' }
+       --                pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperations'}
+       --                pick value.sum() when { where: tag = 'IncomeLossAttributableToParent'}
+        --               pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest'}
+         --              else null
+      revenues_count is count() {where: tag = "Revenues" or tag = "SalesRevenueNet" or tag = "RevenueFromContractWithCustomerExcludingAssessedTax" or tag='SalesRevenueServicesNet' or tag='RevenuesNetOfInterestExpense' or tag='RegulatedAndUnregulatedOperatingRevenue' or tag='HealthCareOrganizationRevenue' or tag='InterestAndDividendIncomeOperating' or tag='RealEstateRevenueNet' or tag='RevenueMineralSales' or tag='OilAndGasRevenue' or tag = 'FinancialServicesRevenue' or tag = 'RegulatedAndUnregulatedOperatingRevenue' and dimn="0"}
       stockholdersequity is count() {where: tag = "StockholdersEquity"}
       --netprofitmarginRatio is netincomeloss / revenues
       --assetturnoverRatio is revenues / assets
@@ -56,7 +56,7 @@ run: num -> {
 }
 
 run: num -> {
-  group_by: sub.name
+  group_by: sub.name, 
   --select: tag, value
   --where: ddate = @2022-04-30
   --aggregate: assets, current_assets, noncurrent_assets, netincomeloss, revenues, stockholdersequity, netprofitmarginRatio, assetturnoverRatio, financialleverageRatio, returnOnEquity
@@ -73,7 +73,7 @@ run: num -> {
 run: num -> {
     group_by: sub.form
     aggregate: number_of_forms is count(adsh)
-    order_by: number_of_forms desc
+    --order_by: number_of_forms desc
 }
 
 //number of forms by form type and by year
@@ -97,10 +97,10 @@ run: num -> {
 }
 
 
-//number of TAGS by form type and by year
+//something with costco
 run: num -> {
     group_by: sub.name, ddate
-    aggregate: stockholdersequity, netincomeloss, revenues_count
+    aggregate: stockholdersequity, revenues_count
     where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0
     --order_by: returnOnEquity desc
    --nest: by_tag is {
@@ -113,6 +113,23 @@ run: num -> {
     --order_by: number_of_forms desc
 }
 
+//costco revenues
+run: num -> {
+    group_by: tag, value
+    aggregate: stockholdersequity, revenues_count
+    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0 and tag ~ "%Reve%"
+    --order_by: returnOnEquity desc
+   --nest: by_tag is {
+   --    group_by: tag
+   --    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0
+       --aggregate: stockholdersequity
+        --num_footnotes is count(txt.adsh)
+        
+   -- }
+    --order_by: number_of_forms desc
+}
+
+//costco tags
 run: num -> {
     group_by: tag, value
     --aggregate: stockholdersequity, netincomeloss, revenues_count
@@ -127,4 +144,81 @@ run: num -> {
    -- }
     --order_by: number_of_forms desc
     limit: 500
+}
+
+//search for AI mentions
+run: txt -> {
+  group_by: sub.name, ddate
+  --select: tag, value
+  where: value ~ '%artificial intelligence%'
+  aggregate: mentions is count_of_values
+  --order_by: mentions desc
+  --aggregate: assets, current_assets, noncurrent_assets, netincomeloss, revenues, stockholdersequity, netprofitmarginRatio, assetturnoverRatio, financialleverageRatio, returnOnEquity
+  --# line_chart
+  --nest: by_month is  {
+  --  group_by: departure_month is ddate.year
+  --  aggregate: returnOnEquity
+    --group_by: carriers.nickname
+  --}
+  limit: 50
+}
+
+--top10 cities
+run: num -> {
+  group_by: sub.city_and_state
+  --select: tag, value
+
+  aggregate: bus_count is count(adsh)
+  where: ddate = @2022 and sub.form="10-K" and dimn=0 and iprx=0 and qtrs=4
+  --order_by: count_of_values desc
+  --aggregate: assets, current_assets, noncurrent_assets, netincomeloss, revenues, stockholdersequity, netprofitmarginRatio, assetturnoverRatio, financialleverageRatio, returnOnEquity
+  --# line_chart
+  nest: top_cities is  {
+    group_by: sub.name, value
+    limit:10
+    where: tag="NetIncomeLoss"
+    --aggregate: form_count is count(adsh)
+    order_by: value desc
+    --group_by: carriers.nickname
+  }
+  limit: 50
+}
+
+run: num -> {
+    select: *
+    limit:100
+    where: tag="NetIncomeLoss" and ddate = @2022 and sub.form="10-K" and sub.name ~ "%AKAMAI TECHNOLOGIES%" and dimn=0 and iprx=0 and qtrs=4
+    --aggregate: form_count is count(adsh)
+    order_by: value desc
+}
+
+run: num -> {
+    group_by: tag
+    limit:10
+    aggregate: count_of_tags is count(tag)
+    --order_by: num_tags desc
+}
+
+
+run: num -> {
+    group_by: sub.name
+    aggregate: num_tags is count(tag)
+    where: sub.form="10-K" or sub.form="10-Q"
+    limit: 20
+    nest: by_year is {
+        group_by: sub.fy, sub.form
+        aggregate: num_tags is count(tag)
+        
+    }
+}
+run: num -> {
+    group_by: tag
+    aggregate: num_tags is count(tag)
+    where: sub.form="10-K" or sub.form="10-Q"
+    limit: 20
+    --nest: by_year is {
+    --    group_by: sub.fy, sub.form
+    --    aggregate: num_tags is count(tag)
+   -- }
+    --order_by: number_of_forms desc
 }
