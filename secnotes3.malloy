@@ -1,0 +1,130 @@
+source: sub is duckdb.sql("""
+  select * from 'sub*.parquet'
+""") extend {
+  dimension: city_and_state_country is concat(cityba, ', ', stprba, ', ', countryba)
+  dimension: city_and_state is concat(cityba, ', ', stprba,)
+  measure: no_reports is count(cik)
+  primary_key: adsh
+  --join_one: txt.adsh with num.adsh
+}
+
+source: txt is duckdb.sql("""
+  select * from 'txt*.parquet'
+""") extend {
+  join_one: sub with adsh   
+  measure: count_of_values is count(value)
+}
+
+source: num is duckdb.sql("""
+  select * from 'num*.parquet'
+""") extend {
+  join_one: sub with adsh 
+  measure:
+      assets is value.sum() { where: tag = 'Assets' }
+      current_assets is value.sum() { where: tag = 'CurrentAssets'}
+      noncurrent_asset_count is count() { where: tag = 'AssetsNoncurrent' }
+      noncurrent_assets is pick assets - current_assets when noncurrent_asset_count = 0 
+                           else value.sum() { where: tag = 'AssetsNoncurrent'}
+      netincomeloss is pick value.sum() when { where: tag = 'NetIncomeLoss'}
+                       pick value.sum() when { where: tag = 'ProfitLoss'}
+                       pick value.sum() when { where: tag = 'NetIncomeLossAvailableToCommonStockholdersBasic' }
+                       pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperations'}
+                       pick value.sum() when { where: tag = 'IncomeLossAttributableToParent'}
+                       pick value.sum() when { where: tag = 'IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest'}
+                       else null
+      revenues_count is count() {where: tag = "Revenues" or tag = "SalesRevenueNet" or tag = "RevenueFromContractWithCustomerExcludingAssessedTax" or tag='SalesRevenueServicesNet' or tag='RevenuesNetOfInterestExpense' or tag='RegulatedAndUnregulatedOperatingRevenue' or tag='HealthCareOrganizationRevenue' or tag='InterestAndDividendIncomeOperating' or tag='RealEstateRevenueNet' or tag='RevenueMineralSales' or tag='OilAndGasRevenue' or tag = 'FinancialServicesRevenue' or tag = 'RegulatedAndUnregulatedOperatingRevenue'}
+      stockholdersequity is count() {where: tag = "StockholdersEquity"}
+      --netprofitmarginRatio is netincomeloss / revenues
+      --assetturnoverRatio is revenues / assets
+      financialleverageRatio is assets / stockholdersequity
+      --returnOnEquity is netprofitmarginRatio * assetturnoverRatio * financialleverageRatio
+
+}
+
+run: num -> {
+  group_by: sub.name
+  aggregate: 
+    no_reports is count(tag)   // outside the pivot
+    --total_distance
+  # pivot
+  nest: by_tag is  {
+    where: value = 'NetIncome' | 'Assets'  // only show these states
+    group_by: sub.name
+    aggregate: no_reports is count(tag)
+    --order_by: state   // sort order of the pivoted columns
+  }
+}
+
+run: num -> {
+  group_by: sub.name
+  --select: tag, value
+  --where: ddate = @2022-04-30
+  --aggregate: assets, current_assets, noncurrent_assets, netincomeloss, revenues, stockholdersequity, netprofitmarginRatio, assetturnoverRatio, financialleverageRatio, returnOnEquity
+  --# line_chart
+  --nest: by_month is  {
+  --  group_by: departure_month is ddate.year
+  --  aggregate: returnOnEquity
+    --group_by: carriers.nickname
+  --}
+  limit: 50
+}
+
+//number of forms by form type
+run: num -> {
+    group_by: sub.form
+    aggregate: number_of_forms is count(adsh)
+    order_by: number_of_forms desc
+}
+
+//number of forms by form type and by year
+run: num -> {
+    group_by: sub.form, sub.fy
+    aggregate: number_of_forms is count(adsh)
+    order_by: number_of_forms desc
+}
+
+//number of TAGS by form type and by year
+run: num -> {
+    group_by: sub.name
+    aggregate: num_tags is count(tag)
+    where: sub.form="10-K" or sub.form="10-Q"
+    nest: by_year is {
+        group_by: sub.fy, sub.form
+        aggregate: num_tags is count(tag)
+        
+    }
+    --order_by: number_of_forms desc
+}
+
+
+//number of TAGS by form type and by year
+run: num -> {
+    group_by: sub.name, ddate
+    aggregate: stockholdersequity, netincomeloss, revenues_count
+    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0
+    --order_by: returnOnEquity desc
+   --nest: by_tag is {
+   --    group_by: tag
+   --    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0
+       --aggregate: stockholdersequity
+        --num_footnotes is count(txt.adsh)
+        
+   -- }
+    --order_by: number_of_forms desc
+}
+
+run: num -> {
+    group_by: tag, value
+    --aggregate: stockholdersequity, netincomeloss, revenues_count
+    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0 and tag ~"%Loss%"
+    --order_by: returnOnEquity desc
+   --nest: by_tag is {
+   --    group_by: tag
+   --    where: sub.cik = "909832" and ddate = @2023-08-31 and sub.form="10-K" and dimn=0
+       --aggregate: stockholdersequity
+        --num_footnotes is count(txt.adsh)
+        
+   -- }
+    --order_by: number_of_forms desc
+    limit: 500
+}
